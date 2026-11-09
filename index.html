@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Santé – Cash flow & payment plan</title>
+<meta name="robots" content="noindex,nofollow">
+<style>
+:root{--bg:#f6f3ee;--fg:#1a1a1a;--accent:#8b1e2d;--line:#d9d2c7;--surface:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#161412;--fg:#f2ede6;--accent:#e2606f;--line:#3a3530;--surface:#201d1a}}
+html,body{height:100%}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 -apple-system,"Segoe UI",Inter,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:28px 26px;max-width:380px;width:100%}
+h1{font-size:20px;margin:0 0 4px}h1 span{color:var(--accent)}p{margin:0 0 16px}
+label{display:block;font-weight:600;margin-bottom:6px}
+input{font:inherit;font-size:22px;letter-spacing:.3em;width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+button{font:inherit;font-weight:600;margin-top:12px;width:100%;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
+button[disabled]{opacity:.6;cursor:wait}
+.err{color:var(--accent);font-weight:600;margin-top:10px;min-height:1.5em}
+.small{font-size:13px;margin-top:14px}
+</style></head><body>
+<form class="card" id="f">
+<h1><span>Santé</span> Cash flow &amp; payment plan</h1>
+<p>Enter the PIN to open the report.</p>
+<label for="pin">PIN</label>
+<input id="pin" type="password" inputmode="numeric" autocomplete="one-time-code" autofocus>
+<button id="b" type="submit">Open</button>
+<div class="err" id="e" role="alert"></div>
+<p class="small">The page and its downloads are stored encrypted; nothing is readable without the PIN.</p>
+</form>
+<script>
+(function(){
+  var ITER = 1000000;
+  function b64(a){ var s=''; for (var i=0;i<a.length;i++) s+=String.fromCharCode(a[i]); return btoa(s); }
+  async function derive(pin, salt){
+    var km = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2', salt: salt, iterations: ITER, hash:'SHA-256'}, km, 256));
+  }
+  async function open(rawKey, buf){
+    var iv = buf.slice(16,28), ct = buf.slice(28);
+    var ck = await crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']);
+    var plain = new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM', iv: iv}, ck, ct));
+    try { sessionStorage.setItem('sante-k', b64(rawKey)); } catch(e){}
+    window.__sk = b64(rawKey);
+    document.open(); document.write(plain.replace('<body>', '<body><script>window.__sk=' + JSON.stringify(b64(rawKey)) + ';<\/script>')); document.close();
+  }
+  var payload = null;
+  fetch('payload.bin', {cache:'no-store'}).then(function(r){ return r.arrayBuffer(); }).then(function(b){ payload = new Uint8Array(b);
+    var k = null; try { k = sessionStorage.getItem('sante-k'); } catch(e){}
+    if (k) { var bin = atob(k), a = new Uint8Array(bin.length); for (var i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); open(a, payload).catch(function(){ try{sessionStorage.removeItem('sante-k');}catch(e){} }); }
+  });
+  document.getElementById('f').addEventListener('submit', async function(ev){
+    ev.preventDefault();
+    var btn = document.getElementById('b'), err = document.getElementById('e'), pin = document.getElementById('pin').value.trim();
+    if (!pin) return; btn.disabled = true; err.textContent = 'Checking…';
+    try {
+      if (!payload) { var r = await fetch('payload.bin', {cache:'no-store'}); payload = new Uint8Array(await r.arrayBuffer()); }
+      var key = await derive(pin, payload.slice(0,16));
+      await open(key, payload);
+    } catch(e) { err.textContent = 'Wrong PIN.'; btn.disabled = false; document.getElementById('pin').select(); }
+  });
+})();
+</script>
+</body></html>
